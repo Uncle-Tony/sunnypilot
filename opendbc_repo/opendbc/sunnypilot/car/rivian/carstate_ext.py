@@ -7,13 +7,18 @@ See the LICENSE.md file in the root directory for more details.
 import math
 from enum import StrEnum
 
-from opendbc.car import Bus, structs
+from opendbc.car import Bus, create_button_events, structs
 from opendbc.can.parser import CANParser
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.rivian.values import DBC
 from opendbc.sunnypilot.car.rivian.values import RivianFlagsSP
 
 ButtonType = structs.CarState.ButtonEvent.Type
+
+# VDM_UserAdasRequest: 0=IDLE, 1=UP_1, 2=UP_2, 3=DOWN_1, 4=DOWN_2
+VDM_BUTTON_MAP = {
+  1: ButtonType.lkas,    # Toggle MADS
+}
 
 MAX_SET_SPEED = 85 * CV.MPH_TO_MS
 MIN_SET_SPEED = 20 * CV.MPH_TO_MS
@@ -31,11 +36,22 @@ class CarStateExt:
     self.increase_counter = 0
     self.decrease_counter = 0
     self.stalk_down_counter = 0
+    self.vdm_user_adas_request = 0
 
-  def update_longitudinal_upgrade(self, ret: structs.CarState, can_parsers: dict[StrEnum, CANParser]) -> None:
+  def update_stalk_controls(self, ret: structs.CarState, can_parsers: dict[StrEnum, CANParser]) -> list:
+    cp = can_parsers[Bus.pt]
+    vdm_user_adas_request = int(cp.vl["VDM_AdasSts"]["VDM_UserAdasRequest"])
+
+    button_events = create_button_events(vdm_user_adas_request, self.vdm_user_adas_request, VDM_BUTTON_MAP)
+    self.vdm_user_adas_request = vdm_user_adas_request
+
+    return button_events
+
+  def update_longitudinal_upgrade(self, ret: structs.CarState, can_parsers: dict[StrEnum, CANParser]) -> list:
     cp_park = can_parsers[Bus.alt]
     cp_adas = can_parsers[Bus.adas]
     cp = can_parsers[Bus.pt]
+    button_events = []
 
     prev_increase_button = self.increase_button
     prev_decrease_button = self.decrease_button
@@ -45,7 +61,7 @@ class CarStateExt:
       right_scroll = cp_park.vl["WheelButtons_Fwd"]["RightButton_Scroll"]
       if right_scroll != 255:
         if self.distance_button != right_scroll:
-          ret.buttonEvents = [structs.CarState.ButtonEvent(pressed=False, type=ButtonType.gapAdjustCruise)]
+          button_events.append(structs.CarState.ButtonEvent(pressed=False, type=ButtonType.gapAdjustCruise))
         self.distance_button = right_scroll
 
       # button logic for set-speed
@@ -89,9 +105,16 @@ class CarStateExt:
       ret.leftBlindspot = cp_park.vl["BSM_BlindSpotIndicator_Fwd"]["BSM_BlindSpotIndicator_Left"] != 0
       ret.rightBlindspot = cp_park.vl["BSM_BlindSpotIndicator_Fwd"]["BSM_BlindSpotIndicator_Right"] != 0
 
+    return button_events
+
   def update(self, ret: structs.CarState, can_parsers: dict[StrEnum, CANParser]) -> None:
+    button_events = []
+
     if self.CP_SP.flags & RivianFlagsSP.LONGITUDINAL_HARNESS_UPGRADE:
-      self.update_longitudinal_upgrade(ret, can_parsers)
+      button_events.extend(self.update_longitudinal_upgrade(ret, can_parsers))
+
+    button_events.extend(self.update_stalk_controls(ret, can_parsers))
+    ret.buttonEvents = button_events
 
   @staticmethod
   def get_parser(CP, CP_SP) -> dict[StrEnum, CANParser]:
