@@ -126,15 +126,26 @@ def main() -> None:
 
       cloudlog.info(f"{len(panda_serials)} panda(s) found, connecting - {panda_serials}")
 
-      # Flash the first panda
-      panda_serial = panda_serials[0]
-      panda = flash_panda(panda_serial)
+      # Flash all connected pandas; track the internal one separately so that
+      # an external upgrade module (e.g. Rivian longitudinal panda) enumerating
+      # first on USB does not get mistaken for the primary panda.
+      panda = None
+      for serial in panda_serials:
+        p = Panda(serial)
+        if p.is_internal():
+          p.close()
+          panda = flash_panda(serial)
+        else:
+          # flash external pandas (e.g. Rivian longitudinal upgrade module)
+          # skip flash_panda — external pandas don't need the standard H7 firmware
+          # initialization and running it on every boot adds unnecessary latency
+          flash_rivian_long(p)
+          p.close()
 
-      # flash Rivian longitudinal upgrade panda
-      flash_rivian_long(panda)
+      panda_serial = panda.get_usb_serial() if panda is not None else None
 
       # Ensure internal panda is present if expected
-      if HARDWARE.has_internal_panda() and not panda.is_internal():
+      if HARDWARE.has_internal_panda() and panda is None:
         cloudlog.error("Internal panda is missing, trying again")
         no_internal_panda_count += 1
         continue
