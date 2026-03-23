@@ -50,8 +50,7 @@ class CarController(CarControllerBase, MadsCarController):
     blip = self.mads.lat_active and not lka_act_toi
     send_torque = 0 if blip else apply_torque
     send_lka_act_toi = 1 if (self.mads.lat_active and not blip) else 0
-    send_elk_request = 0 if (blip or not self.mads.lat_active) else 4
-    can_sends.append(create_lka_steering(self.packer, self.frame, CS.acm_lka_hba_cmd, send_torque, CC.enabled, CC.latActive, self.mads, send_lka_act_toi, send_elk_request))
+    can_sends.append(create_lka_steering(self.packer, self.frame, CS.acm_lka_hba_cmd, send_torque, CC.enabled, CC.latActive, self.mads, send_lka_act_toi))
     if not blip:
       self.apply_torque_last = apply_torque
 
